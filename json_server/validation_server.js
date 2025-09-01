@@ -26,45 +26,74 @@ function formatErrors(errors = []) {
   }));
 }
 
-// ---- Numbered-sentence error formatter ----
+// ---- Numbered-sentence error formatter (clean paths, no "(root)") ----
 function formatErrorsAsSentences(errors = []) {
-  const sentences = errors.map((e, idx) => {
-    // Build a clearer path; include missing property when relevant
-    const base = e.instancePath || "";
-    const mp = e.params && e.params.missingProperty ? `/${e.params.missingProperty}` : "";
-    const path = (base + mp) || "(root)";
+  const rmSlash = (p) => (p || "").replace(/^\/+/, ""); // strip leading '/'
+  const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+  return errors.map((e, idx) => {
+    const inst = e.instancePath || "";
+    const missing = e.params && e.params.missingProperty ? e.params.missingProperty : null;
+
+    // Build a display path (without leading slash); may be "" at root
+    const combinedPath = inst + (missing ? `/${missing}` : "");
+    const path = rmSlash(combinedPath);
+    const atPath = path ? `${path} ` : ""; // prefix used when we *have* a path
 
     switch (e.keyword) {
       case "required":
-        return `${idx + 1}. ${path} is missing a required property '${e.params.missingProperty}'.`;
+        // If we're at root, don't show "(root)" — use a plain message
+        return `${idx + 1}. ${
+          inst ? `${rmSlash(inst)} is missing required property '${missing}'.`
+               : `Missing required property '${missing}'.`
+        }`;
+
       case "additionalProperties":
-        return `${idx + 1}. ${path} has unexpected property '${e.params.additionalProperty}'.`;
+        // Root → "Unexpected property 'x' found."
+        // Nested → "user.settings has unexpected property 'x'."
+        return `${idx + 1}. ${
+          inst
+            ? `${rmSlash(inst)} has unexpected property '${e.params.additionalProperty}'.`
+            : `Unexpected property '${e.params.additionalProperty}' found.`
+        }`;
+
       case "type":
-        return `${idx + 1}. ${path} must be of type '${e.params.type}'.`;
+        return `${idx + 1}. ${atPath}must be of type '${e.params.type}'.`;
+
       case "format":
-        return `${idx + 1}. ${path} must match format '${e.params.format}'.`;
+        return `${idx + 1}. ${atPath}must match format '${e.params.format}'.`;
+
       case "enum":
-        return `${idx + 1}. ${path} must be one of: ${e.params.allowedValues.join(", ")}.`;
+        return `${idx + 1}. ${atPath}must be one of: ${e.params.allowedValues.join(", ")}.`;
+
       case "minLength":
-        return `${idx + 1}. ${path} must have at least ${e.params.limit} characters.`;
+        return `${idx + 1}. ${atPath}must have at least ${e.params.limit} characters.`;
+
       case "maxLength":
-        return `${idx + 1}. ${path} must have at most ${e.params.limit} characters.`;
+        return `${idx + 1}. ${atPath}must have at most ${e.params.limit} characters.`;
+
       case "minimum":
-        return `${idx + 1}. ${path} must be >= ${e.params.limit}.`;
+        return `${idx + 1}. ${atPath}must be >= ${e.params.limit}.`;
+
       case "maximum":
-        return `${idx + 1}. ${path} must be <= ${e.params.limit}.`;
+        return `${idx + 1}. ${atPath}must be <= ${e.params.limit}.`;
+
       case "minItems":
-        return `${idx + 1}. ${path} must have at least ${e.params.limit} items.`;
+        return `${idx + 1}. ${atPath}must have at least ${e.params.limit} items.`;
+
       case "maxItems":
-        return `${idx + 1}. ${path} must have at most ${e.params.limit} items.`;
+        return `${idx + 1}. ${atPath}must have at most ${e.params.limit} items.`;
+
       case "pattern":
-        return `${idx + 1}. ${path} must match pattern ${e.params.pattern}.`;
+        return `${idx + 1}. ${atPath}must match pattern ${e.params.pattern}.`;
+
       default:
-        // Fallback to Ajv’s message if we didn’t special-case it
-        return `${idx + 1}. ${path} ${e.message}.`;
+        // Generic fallback; if no path, just show the message capitalized.
+        return `${idx + 1}. ${
+          path ? `${path} ${e.message}.` : `${cap(e.message || "validation error")}.`
+        }`;
     }
   });
-  return sentences;
 }
 
 app.get("/test", (req,res) => {

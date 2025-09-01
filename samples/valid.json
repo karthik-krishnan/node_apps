@@ -1,0 +1,10 @@
+{
+  "beaconId": 123,
+  "id": 1,
+  "name": "Ada",
+  "email": "ada@example.com",
+  "tags": [
+    "dev",
+    "ai"
+  ]
+}

@@ -1,12 +1,16 @@
 const express = require("express");
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
+const path = require("path");
 
 // Load schema from file
 const userSchema = require("./schemas/user.schema.json");
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
+
+app.set("view engine", "ejs");
+app.set("views", path.join(__dirname, "views"));  
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 addFormats(ajv);
@@ -156,83 +160,13 @@ function escapeHtml(s) {
     .replace(/'/g, "&#39;");
 }
 
-// NEW: pretty HTML view of the current state
+// pretty HTML view of the current state
 app.get("/state/html", (req, res) => {
-  const rows = state.records.map(r => {
-    const valid = r.ValidationStatus === "Valid";
-    const cls = valid ? "valid" : "invalid";
-    const errors = (r.formattedErrorList || [])
-      .map(e => `<li>${escapeHtml(e)}</li>`)
-      .join("");
-
-    return `
-      <tr class="${cls}">
-        <td>${escapeHtml(r.timestamp)}</td>
-        <td>${escapeHtml(r.BeaconId)}</td>
-        <td>${escapeHtml(r.ValidationStatus)}</td>
-        <td>${errors ? `<ul>${errors}</ul>` : ""}</td>
-      </tr>
-    `;
-  }).join("");
-
-  const html = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Validation Results</title>
-  <meta http-equiv="refresh" content="2"> 
-  <style>
-    body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; padding:16px; }
-    table { border-collapse: collapse; width:100%; }
-    th, td { border: 1px solid #e5e7eb; padding:8px; vertical-align: top; }
-    th { background:#f3f4f6; text-align:left; }
-    tr.valid { background:#ecfdf5; }    /* green-50 */
-    tr.invalid { background:#fef2f2; }  /* red-50 */
-    .meta { color:#6b7280; font-size:12px; margin:8px 0 16px; }
-    .btn { padding:6px 10px; border-radius:8px; border:1px solid #d1d5db; background:#fff; cursor:pointer; }
-    .btn:hover { background:#f9fafb; }
-  </style>
-</head>
-<body>
-  <h1>Validation Results</h1>
-  <div class="meta">
-    Records: ${state.records.length} —
-    <a href="/state">View JSON</a> —
-    <a href="/state/html">Refresh</a>
-    <button class="btn" id="clearBtn" onclick="clearState()">Clear State</button>
-  </div>
-  <table>
-    <thead>
-      <tr><th>Timestamp</th><th>BeaconId</th><th>Status</th><th>Errors</th></tr>
-    </thead>
-    <tbody>
-      ${rows || '<tr><td colspan="4"><em>No records yet</em></td></tr>'}
-    </tbody>
-  </table>
-  <!-- NEW: tiny script to call DELETE /state and reload -->
-  <script>
-    async function clearState() {
-      if (!confirm('Clear all records?')) return;
-      try {
-        const resp = await fetch('/state', { method: 'DELETE' });
-        if (resp.ok) {
-          location.reload();
-        } else {
-          const t = await resp.text();
-          alert('Failed to clear state: ' + t);
-        }
-      } catch (e) {
-        alert('Failed to clear state: ' + e);
-      }
-    }
-  </script>  
-</body>
-</html>`;
-
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.send(html);
-});
-
+  res.render("state", {
+    count: state.records.length,                    
+    records: state.records                          
+  });                                                     
+});         
 
 app.listen(8000, () => console.log("Listening on http://localhost:8000"));
 

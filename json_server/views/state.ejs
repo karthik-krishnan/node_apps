@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Validation Results</title>
+  <meta http-equiv="refresh" content="2">
+  <style>
+    body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; padding:16px; }
+    table { border-collapse: collapse; width:100%; }
+    th, td { border: 1px solid #e5e7eb; padding:8px; vertical-align: top; }
+    th { background:#f3f4f6; text-align:left; }
+    tr.valid { background:#ecfdf5; }    /* green-50 */
+    tr.invalid { background:#fef2f2; }  /* red-50 */
+    .meta { color:#6b7280; font-size:12px; margin:8px 0 16px; display:flex; gap:12px; align-items:center; }
+    .btn { padding:6px 10px; border-radius:8px; border:1px solid #d1d5db; background:#fff; cursor:pointer; }
+    .btn:hover { background:#f9fafb; }
+    ul { margin:0; padding-left: 18px; }
+  </style>
+</head>
+<body>
+  <h1>Validation Results</h1>
+  <div class="meta">
+    Records: <%= count %>&nbsp;&nbsp;/
+    <a href="/state">View JSON</a>/
+    <a href="/state/html">Refresh</a>
+    <button class="btn" id="clearBtn" onclick="clearState()">Clear State</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Timestamp</th><th>BeaconId</th><th>Status</th><th>Errors</th></tr>
+    </thead>
+    <tbody>
+      <% if (!records || records.length === 0) { %>
+        <tr><td colspan="4"><em>No records yet</em></td></tr>
+      <% } else { %>
+        <% records.forEach(function(r) { const valid = r.ValidationStatus === "Valid"; %>
+          <tr class="<%= valid ? "valid" : "invalid" %>">
+            <td><%= r.timestamp %></td>
+            <td><%= r.BeaconId %></td>
+            <td><%= r.ValidationStatus %></td>
+            <td>
+              <% if (r.formattedErrorList && r.formattedErrorList.length) { %>
+                <ul>
+                  <% r.formattedErrorList.forEach(function(e){ %>
+                    <li><%= e %></li>
+                  <% }); %>
+                </ul>
+              <% } %>
+            </td>
+          </tr>
+        <% }); %>
+      <% } %>
+    </tbody>
+  </table>
+
+  <script>
+    async function clearState() {
+      if (!confirm('Clear all records?')) return;
+      try {
+        const resp = await fetch('/state', { method: 'DELETE' });
+        if (resp.ok) location.reload();
+        else alert('Failed to clear state: ' + await resp.text());
+      } catch (e) {
+        alert('Failed to clear state: ' + e);
+      }
+    }
+  </script>
+</body>
+</html>

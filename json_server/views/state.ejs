@@ -4,24 +4,13 @@
   <meta charset="utf-8">
   <title>Validation Results</title>
   <meta http-equiv="refresh" content="2">
-  <style>
-    body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; padding:16px; }
-    table { border-collapse: collapse; width:100%; }
-    th, td { border: 1px solid #e5e7eb; padding:8px; vertical-align: top; }
-    th { background:#f3f4f6; text-align:left; }
-    tr.valid { background:#ecfdf5; }    /* green-50 */
-    tr.invalid { background:#fef2f2; }  /* red-50 */
-    .meta { color:#6b7280; font-size:12px; margin:8px 0 16px; display:flex; gap:12px; align-items:center; }
-    .btn { padding:6px 10px; border-radius:8px; border:1px solid #d1d5db; background:#fff; cursor:pointer; }
-    .btn:hover { background:#f9fafb; }
-    ul { margin:0; padding-left: 18px; }
-  </style>
+  <link rel="stylesheet" href="/state.css"> <!-- NEW: external CSS -->
 </head>
 <body>
   <h1>Validation Results</h1>
   <div class="meta">
-    Records: <%= count %>&nbsp;&nbsp;/
-    <a href="/state">View JSON</a>/
+    Records: <%= count %> —
+    <a href="/state">View JSON</a> —
     <a href="/state/html">Refresh</a>
     <button class="btn" id="clearBtn" onclick="clearState()">Clear State</button>
   </div>

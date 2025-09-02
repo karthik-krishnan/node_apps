@@ -11,6 +11,7 @@ app.use(express.json({ limit: "1mb" }));
 
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));  
+app.use(express.static(path.join(__dirname, "public")));
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 addFormats(ajv);

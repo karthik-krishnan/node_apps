@@ -180,6 +180,7 @@ app.get("/state/html", (req, res) => {
 <head>
   <meta charset="utf-8">
   <title>Validation Results</title>
+  <meta http-equiv="refresh" content="2"> 
   <style>
     body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; padding:16px; }
     table { border-collapse: collapse; width:100%; }

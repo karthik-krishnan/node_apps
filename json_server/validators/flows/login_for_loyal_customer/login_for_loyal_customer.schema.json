@@ -13,7 +13,7 @@
                 "type": "string",
                 "pattern": "^[a-fA-F0-9]{64}$"
               },
-              "loyalty.member": { "type": "string", "pattern": "^true$"},
+              "loyalty.member": {"type": "string", "pattern": "^true$", "transform": ["toLowerCase"]},
               "loyalty.number": {
                 "type": "integer",
                 "minimum": 1

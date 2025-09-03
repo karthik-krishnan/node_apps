@@ -15,8 +15,7 @@
               },
               "loyalty.member": {
                 "anyOf": [
-                  { "type": "boolean", "const": false },
-                  { "type": "string", "pattern": "^false$", "transform": ["toLowerCase"] }
+                 { "type": "string", "pattern": "^true|false$", "transform": ["toLowerCase"] }
                 ]
               },
               "loyalty.number": {

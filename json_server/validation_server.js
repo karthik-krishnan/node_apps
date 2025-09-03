@@ -239,6 +239,7 @@ app.get("/sessions/:sessionId/flows/:flowId", (req, res) => {
    EVENT INGEST (POST /) — now uses sticky current session/flow
    ===================================================== */
 app.post("/", async (req, res) => {                      // CHANGED (sticky)
+  console.log("Received JSON:", req.body);
   // No headers needed; we route to current pointers
   if (!current.sessionId) return res.status(409).json({ ok: false, error: "No active session. Start a session." });
   if (!current.flowId) return res.status(409).json({ ok: false, error: "No active flow. Start a flow." });

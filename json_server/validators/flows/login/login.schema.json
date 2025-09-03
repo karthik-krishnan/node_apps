@@ -1,0 +1,36 @@
+{
+    "$id": "https://example.com/schemas/login.json",
+    "title": "Custom Event Schema with Conditional Loyalty Number",
+    "type": "object",
+    "properties": {
+      "data": {
+        "type": "object",
+        "properties": {
+          "custom_attributes": {
+            "type": "object",
+            "properties": {
+              "user.hashedEmail": {
+                "type": "string",
+                "pattern": "^[a-fA-F0-9]{64}$"
+              },
+              "loyalty.member": {
+                "anyOf": [
+                  { "type": "boolean", "const": false },
+                  { "type": "string", "pattern": "^false$", "transform": ["toLowerCase"] }
+                ]
+              },
+              "loyalty.number": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": ["user.hashedEmail", "loyalty.member"],
+            "additionalProperties": true
+          }
+        },
+        "required": ["custom_attributes"]
+      }
+    },
+    "required": ["data"]
+  }
+  

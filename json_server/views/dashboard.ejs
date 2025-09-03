@@ -1,0 +1,180 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Validation Dashboard</title>
+  <link rel="stylesheet" href="/state.css" />
+</head>
+<body>
+<div class="wrap">
+  <h1>Validation Dashboard</h1>
+
+  <div id="header" class="flex">
+    <div id="header-info">
+        <% if (current && current.sessionId) { %>
+        <div>Current Session: <span class="badge badge-current"><%= current.sessionId %></span>
+            <% if (current.flowId) { %> — Current Flow: <span class="badge badge-current"><%= current.flowId %></span><% } %>
+        </div>
+        <% } else { %>
+        <div class="tag">No active session</div>
+        <% } %>
+    </div>
+    <div class="spacer"></div>
+    <label class="tag"><input type="checkbox" id="autoChk" checked> Auto-refresh</label>
+  </div>
+
+  <div id="totals" class="counts"></div>
+
+  <div class="controls">
+    <button class="btn btn--primary" onclick="startSession()">Start Session</button>
+    <button class="btn" onclick="endSession()">End Session</button>
+    <button class="btn btn--primary" onclick="startFlow()">Start Flow…</button>
+    <button class="btn" onclick="endFlow()">End Flow</button>
+    <button class="btn btn--danger" onclick="clearAll()">Clear All</button>
+    <a class="btn" href="/state">View JSON</a>
+  </div>
+
+  <div id="root"></div>
+</div>
+
+<script>
+  const openKeys = new Set();
+  let auto = true;
+
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+  const fidKey = (sid,fid) => `flow:${sid}:${fid}`;
+
+  function captureOpen() {
+    openKeys.clear();
+    document.querySelectorAll('details[open]').forEach(d => openKeys.add(d.id));
+  }
+  function restoreOpen() {
+    openKeys.forEach(id => { const d = document.getElementById(id); if (d) d.setAttribute('open',''); });
+  }
+
+  function render(model) {
+    const headerInfo = document.getElementById('header-info');
+    headerInfo.innerHTML = (model.current && model.current.sessionId)
+        ? `Current Session: <span class="badge badge-current">${esc(model.current.sessionId)}</span>${
+            model.current.flowId
+            ? ` — Current Flow: <span class="badge badge-current">${esc(model.current.flowId)}</span>`
+            : ''
+        }`
+    : `<span class="tag">No active session</span>`;
+
+    const totals = document.getElementById('totals');
+    totals.innerHTML = `
+      <span>Total Sessions: <b>${model.totals.sessions}</b></span>
+      <span>Total Flows: <b>${model.totals.flows}</b></span>
+      <span>Total Events: <b>${model.totals.events}</b></span>
+      <span class="ok">Valid: <b>${model.totals.valid}</b></span>
+      <span class="bad">Invalid: <b>${model.totals.invalid}</b></span>
+    `;
+
+    const root = document.getElementById('root');
+    const parts = [];
+
+    if (!model.sessions || model.sessions.length === 0) {
+      parts.push(`<p><em>No sessions yet.</em></p>`);
+    } else {
+      for (const s of model.sessions) {
+        parts.push(`
+          <section class="section">
+            <h2>
+              Session <code>${esc(s.sessionId)}</code>
+              ${s.isCurrent ? `<span class="badge badge-current">current</span>` : ``}
+            </h2>
+            <div class="meta">
+              Created: ${esc(s.createdAt)}
+              ${s.endedAt ? ` — Ended: ${esc(s.endedAt)}` : ``}
+              — Flows: ${s.flowCount} — Events: ${s.eventCount}
+              — <span class="ok">Valid: ${s.validCount}</span> — <span class="bad">Invalid: ${s.invalidCount}</span>
+            </div>
+        `);
+
+        if (!s.flows || s.flows.length === 0) {
+          parts.push(`<p><em>No flows in this session.</em></p>`);
+        } else {
+          for (const f of s.flows) {
+            const openAttr = openKeys.has(fidKey(s.sessionId, f.flowId)) || f.isCurrent ? ' open' : '';
+            parts.push(`
+              <details id="${fidKey(s.sessionId, f.flowId)}" class="details"${openAttr}>
+                <summary class="summary">
+                  Flow <code>${esc(f.flowId)}</code> — ${esc(f.name)}
+                  ${f.isCurrent ? `<span class="badge badge-current">current</span>` : ``}
+                  <span class="tag">
+                    &nbsp;Created: ${esc(f.createdAt)} ${f.endedAt ? ` — Ended: ${esc(f.endedAt)}` : ``}
+                    — Events: ${f.count} — <span class="ok">Valid: ${f.validCount}</span> — <span class="bad">Invalid: ${f.invalidCount}</span>
+                  </span>
+                </summary>
+
+                <table class="mt-2">
+                  <thead>
+                    <tr><th>When</th><th>EventId</th><th>BeaconId</th><th>Status</th><th>Errors</th></tr>
+                  </thead>
+                  <tbody>
+                    ${(!f.events || f.events.length === 0)
+                      ? `<tr><td colspan="5"><em>No events</em></td></tr>`
+                      : f.events.map(ev => {
+                          const ok = ev.ValidationStatus === 'Valid';
+                          const errs = (ev.formattedErrorList || []).map(e => `<li>${esc(e)}</li>`).join('');
+                          return `
+                            <tr class="${ok ? 'valid' : 'invalid'}">
+                              <td>${esc(ev.timestamp)}</td>
+                              <td><code>${esc(ev.eventId)}</code></td>
+                              <td>${esc(ev.BeaconId)}</td>
+                              <td>${esc(ev.ValidationStatus)}</td>
+                              <td>${errs ? `<ul>${errs}</ul>` : ''}</td>
+                            </tr>
+                          `;
+                        }).join('')}
+                  </tbody>
+                </table>
+              </details>
+            `);
+          }
+        }
+        parts.push(`</section>`);
+      }
+    }
+
+    root.innerHTML = parts.join('');
+    document.querySelectorAll('details').forEach(d => {
+      d.addEventListener('toggle', () => { if (d.open) openKeys.add(d.id); else openKeys.delete(d.id); });
+    });
+  }
+
+  async function fetchAndRender() {
+    try {
+      captureOpen();
+      const res = await fetch('/dashboard/data');
+      const model = await res.json();
+      render(model);
+      restoreOpen();
+    } catch (e) { console.warn('Refresh failed:', e); }
+  }
+
+  async function api(path, method='GET', body) {
+    const opts = { method, headers: {} };
+    if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    const res = await fetch(path, opts);
+    if (!res.ok) throw new Error(await res.text());
+    return res.json().catch(() => ({}));
+  }
+  async function clearAll(){ if(!confirm('Clear ALL sessions, flows, and events?'))return; await api('/state','DELETE'); await fetchAndRender(); }
+  async function startSession(){ await api('/sessions','POST'); await fetchAndRender(); }
+  async function endSession(){ await api('/sessions/end','POST'); await fetchAndRender(); }
+  async function startFlow(){
+    const flowId = prompt('Enter flowId (alphanumeric + underscore):'); if(!flowId) return;
+    const name = prompt('Optional flow name:', flowId) || flowId;
+    await api('/flows','POST',{ flowId, name }); await fetchAndRender();
+  }
+  async function endFlow(){ await api('/flows/end','POST'); await fetchAndRender(); }
+
+  const chk = document.getElementById('autoChk');
+  chk.addEventListener('change', () => { auto = chk.checked; });
+  setInterval(() => { if (auto) fetchAndRender(); }, 2000);
+  fetchAndRender();
+</script>
+</body>
+</html>

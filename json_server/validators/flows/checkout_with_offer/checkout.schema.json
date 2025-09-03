@@ -1,0 +1,16 @@
+{
+    "$id": "https://example.com/schemas/checkout_with_offer.json",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["beaconId", "id", "name", "email", "offerId"],
+    "properties": {
+      "beaconId": { "type": "integer", "minimum": 1 },
+      "id": { "type": "integer", "minimum": 1 },
+      "name": { "type": "string", "minLength": 3 },
+      "email": { "type": "string", "format": "email" },
+      "offerId": { "type": "string", "minLength": 6 },
+      "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 10 }
+    }
+  }
+  
+  

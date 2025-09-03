@@ -1,0 +1,15 @@
+{
+    "$id": "https://example.com/schemas/checkout.json",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["beaconId", "id", "name", "email"],
+    "properties": {
+      "beaconId": { "type": "integer", "minimum": 1 },
+      "id": { "type": "integer", "minimum": 1 },
+      "name": { "type": "string", "minLength": 2 },
+      "email": { "type": "string", "format": "email" },
+      "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 10 }
+    }
+  }
+  
+  

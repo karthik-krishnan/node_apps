@@ -93,7 +93,7 @@ function findByMessageId(messageId) {
 
 // Collect rows for export
 function collectMessages(scope) {
-  // returns array of {sessionId, flowId, messageId, timestamp, ValidationStatus, formattedErrorList, message}
+  // returns array of {sessionId, flowId, messageId, timestamp, ValidationStatus, formattedErrorList, payload}
   const rows = [];
   if (!state.sessions) return rows;
 
@@ -104,7 +104,7 @@ function collectMessages(scope) {
     timestamp: m.timestamp,
     status: m.ValidationStatus,
     errors: (m.formattedErrorList || []).join(" | "),
-    message: JSON.stringify(m.message ?? {})
+    payload: JSON.stringify(m.payload ?? {})
   });
 
   const { sessionId, flowId } = scope;
@@ -281,7 +281,7 @@ app.get("/sessions/:sessionId/flows/:flowId", (req, res) => {
   
     const sessionId = current.sessionId;
     const flowId    = current.flowId;
-    const message   = req.body;
+    const payload   = req.body;
   
     const s = getSession(sessionId);
     const f = getFlow(sessionId, flowId);
@@ -314,7 +314,7 @@ app.get("/sessions/:sessionId/flows/:flowId", (req, res) => {
     let customErrors = [];
     let valid = true;
     try {
-      const result = await validator.validate(message, ctx);
+      const result = await validator.validate(payload, ctx);
       valid         = result.valid;
       schemaErrors  = result.schemaErrors || [];
       customErrors  = result.customErrors || [];
@@ -341,9 +341,9 @@ app.get("/sessions/:sessionId/flows/:flowId", (req, res) => {
       timestamp: new Date().toISOString(),
       ValidationStatus: valid ? "Valid" : "Invalid",
       formattedErrorList,
-      message                                            
+      payload                                            
     };
-    f.messages.push(record);
+    f.messages.push(record)
   
     // Respond with messageId
     if (valid) return res.json({ ok: true,  messageId: record.messageId });
@@ -457,7 +457,7 @@ async function exportXlsx(res, filename, rows) {
     { header: "Timestamp",  key: "timestamp", width: 24 },
     { header: "Status",     key: "status",    width: 10 },
     { header: "Errors",     key: "errors",    width: 60 },
-    { header: "Message (JSON)", key: "message", width: 80 },
+    { header: "Payload (JSON)", key: "payload", width: 80 },
   ];
   ws.addRows(rows);
 
@@ -478,8 +478,8 @@ app.get("/messages/:messageId.json", (req, res) => {
 app.get("/messages/:messageId", (req, res) => {
   const { message, sessionId, flowId } = findByMessageId(req.params.messageId);
   if (!message) return res.status(404).send("Not found");
-  const messagePretty = JSON.stringify(message.message ?? {}, null, 2);
-  res.render("message", { message, sessionId, flowId, messagePretty });
+  const payloadPretty = JSON.stringify(message.payload ?? {}, null, 2);
+  res.render("message", { message, sessionId, flowId, payloadPretty });
 });
 
 // Render initial HTML (no meta refresh anymore)

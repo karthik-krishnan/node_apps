@@ -47,10 +47,24 @@
   <pre id="message" class="mt-2"><code><%- payloadPretty %></code></pre>
 
   <script>
+    function copyToClipboardFallback(text) {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            document.execCommand('copy');
+        } catch (err) {
+            console.error('Fallback copy failed:', err);
+        }
+        document.body.removeChild(textarea);
+    }
+
     async function copyMessage() {
-      const txt = document.getElementById('message').innerText;
-      try { await navigator.clipboard.writeText(txt); alert('Message copied'); }
-      catch (e) { alert('Copy failed: ' + e); }
+      const txt = document.getElementById('message').innerText;      
+      copyToClipboardFallback(txt);
+      // try { await navigator.clipboard.writeText(txt); alert('Message copied'); }
+      // catch (e) { alert('Copy failed: ' + e); }
     }
   </script>
 </body>

@@ -25,7 +25,7 @@ state = {
     [sessionId]: {
       createdAt, endedAt|null,
       flows: {
-        [flowId]: { name, createdAt, endedAt|null, events: [ ... ] }
+        [flowId]: { name, createdAt, endedAt|null, messages: [ ... ] }
       }
     }
   }
@@ -72,60 +72,56 @@ function ensureFlow(sessionId, flowId, name) {
       name: name || flowId,
       createdAt: new Date().toISOString(),
       endedAt: null,
-      events: []
+      messages: []
     };
   }
   return s.flows[flowId];
 }
 
-// Find a captured event anywhere by payloadId
-function findByPayloadId(payloadId) {
-  // If you have sessions/flows:
+// Find a captured message anywhere by messageId
+function findByMessageId(messageId) {
   if (state.sessions) {
     for (const [sid, s] of Object.entries(state.sessions)) {
       for (const [fid, f] of Object.entries(s.flows || {})) {
-        const ev = (f.events || []).find(e => e.payloadId === payloadId);
-        if (ev) return { sessionId: sid, flowId: fid, event: ev };
+        const m = (f.messages || []).find(e => e.messageId === messageId);
+        if (m) return { sessionId: sid, flowId: fid, message: m };
       }
     }
-    return { sessionId: null, flowId: null, event: null };
+    return { sessionId: null, flowId: null, message: null };
   }
-  // Flat fallback:
-  const ev = (state.records || []).find(e => e.payloadId === payloadId);
-  return { sessionId: null, flowId: null, event: ev || null };
 }
 
 // Collect rows for export
-function collectEvents(scope) {
-  // returns array of {sessionId, flowId, payloadId, timestamp, ValidationStatus, formattedErrorList, payload}
+function collectMessages(scope) {
+  // returns array of {sessionId, flowId, messageId, timestamp, ValidationStatus, formattedErrorList, message}
   const rows = [];
   if (!state.sessions) return rows;
 
-  const pushEv = (sid, fid, ev) => rows.push({
+  const pushMessage = (sid, fid, m) => rows.push({
     sessionId: sid,
     flowId: fid,
-    payloadId: ev.payloadId,
-    timestamp: ev.timestamp,
-    status: ev.ValidationStatus,
-    errors: (ev.formattedErrorList || []).join(" | "),
-    payload: JSON.stringify(ev.payload ?? {})
+    messageId: m.messageId,
+    timestamp: m.timestamp,
+    status: m.ValidationStatus,
+    errors: (m.formattedErrorList || []).join(" | "),
+    message: JSON.stringify(m.message ?? {})
   });
 
   const { sessionId, flowId } = scope;
   if (sessionId && flowId) {
     const fl = state.sessions[sessionId]?.flows?.[flowId];
-    if (fl) fl.events.forEach(ev => pushEv(sessionId, flowId, ev));
+    if (fl) fl.messages.forEach(m => pushMessage(sessionId, flowId, m));
     return rows;
   }
   if (sessionId) {
     const s = state.sessions[sessionId];
-    if (s) Object.entries(s.flows || {}).forEach(([fid, fl]) => fl.events.forEach(ev => pushEv(sessionId, fid, ev)));
+    if (s) Object.entries(s.flows || {}).forEach(([fid, fl]) => fl.messages.forEach(m => pushMessage(sessionId, fid, m)));
     return rows;
   }
   // global
   Object.entries(state.sessions).forEach(([sid, s]) => {
     Object.entries(s.flows || {}).forEach(([fid, fl]) => {
-      fl.events.forEach(ev => pushEv(sid, fid, ev));
+      fl.messages.forEach(m => pushMessage(sid, fid, m));
     });
   });
   return rows;
@@ -218,7 +214,7 @@ app.get("/sessions", (req, res) => {
     createdAt: s.createdAt,
     endedAt: s.endedAt,
     flowCount: Object.keys(s.flows).length,
-    eventCount: Object.values(s.flows).reduce((n, f) => n + f.events.length, 0)
+    messageCount: Object.values(s.flows).reduce((n, f) => n + f.messages.length, 0)
   }));
   res.json({ ok: true, sessions: out, current });
 });
@@ -275,7 +271,7 @@ app.get("/sessions/:sessionId/flows/:flowId", (req, res) => {
 });
 
 /* =====================================================
-   EVENT INGEST (POST /) — now uses sticky current session/flow
+   MESSAGE INGEST (POST /) — now uses sticky current session/flow
    ===================================================== */
    app.post("/", async (req, res) => {
     console.log("Received JSON:", req.body);
@@ -285,20 +281,20 @@ app.get("/sessions/:sessionId/flows/:flowId", (req, res) => {
   
     const sessionId = current.sessionId;
     const flowId    = current.flowId;
-    const payload   = req.body;
+    const message   = req.body;
   
     const s = getSession(sessionId);
     const f = getFlow(sessionId, flowId);
   
-    // Build cross-event context
+    // Build cross-message context
     const ctx = {
       sessionId, flowId, state,
-      findEvents: ({ flowId: fid, where } = {}) => {
+      findMessages: ({ flowId: fid, where } = {}) => {
         const flows = fid ? [getFlow(sessionId, fid)] : Object.values(s.flows);
         const out = [];
         for (const fl of flows) {
-          for (const ev of fl.events) {
-            if (!where || where(ev)) out.push(ev);
+          for (const m of fl.messages) {
+            if (!where || where(m)) out.push(m);
           }
         }
         return out;
@@ -318,7 +314,7 @@ app.get("/sessions/:sessionId/flows/:flowId", (req, res) => {
     let customErrors = [];
     let valid = true;
     try {
-      const result = await validator.validate(payload, ctx);
+      const result = await validator.validate(message, ctx);
       valid         = result.valid;
       schemaErrors  = result.schemaErrors || [];
       customErrors  = result.customErrors || [];
@@ -341,17 +337,17 @@ app.get("/sessions/:sessionId/flows/:flowId", (req, res) => {
         ];
   
     const record = {
-      payloadId: randomUUID(),                              
+      messageId: randomUUID(),                              
       timestamp: new Date().toISOString(),
       ValidationStatus: valid ? "Valid" : "Invalid",
       formattedErrorList,
-      payload                                            
+      message                                            
     };
-    f.events.push(record);
+    f.messages.push(record);
   
-    // Respond with payloadId
-    if (valid) return res.json({ ok: true,  payloadId: record.payloadId });
-    return res.status(400).json({ ok: false, payloadId: record.payloadId, errors: formattedErrorList });
+    // Respond with messageId
+    if (valid) return res.json({ ok: true,  messageId: record.messageId });
+    return res.status(400).json({ ok: false, messageId: record.messageId, errors: formattedErrorList });
   });
   
 
@@ -362,8 +358,8 @@ app.get("/state", (req, res) => {
   const records = [];
   for (const [sid, s] of Object.entries(state.sessions)) {
     for (const [fid, f] of Object.entries(s.flows)) {
-      for (const ev of f.events) {
-        records.push({ sessionId: sid, flowId: fid, ...ev });
+      for (const m of f.messages) {
+        records.push({ sessionId: sid, flowId: fid, ...m });
       }
     }
   }
@@ -381,9 +377,9 @@ app.delete("/state", (req, res) => {
    HTML Views (mark current)
    ===================================================== */
 
-// ---------- Dashboard model builders (use payloads in the JSON) ----------
+// ---------- Dashboard model builders (use messages in the JSON) ----------
 function summarizeFlow(sessionId, flowId, fl, isCurrent) {
-  const list = fl.events || []; // state stays "events"
+  const list = fl.messages || [];
   const validCount = list.filter(e => e.ValidationStatus === "Valid").length;
   const invalidCount = list.length - validCount;
 
@@ -393,15 +389,15 @@ function summarizeFlow(sessionId, flowId, fl, isCurrent) {
     createdAt: fl.createdAt,
     endedAt: fl.endedAt || null,
     isCurrent: !!isCurrent,
-    payloadCount: list.length,
+    messageCount: list.length,
     validCount,
     invalidCount,
     // What the dashboard renders as rows:
-    payloads: list.map(ev => ({
-      payloadId: ev.payloadId,
-      timestamp: ev.timestamp,
-      ValidationStatus: ev.ValidationStatus,
-      formattedErrorList: ev.formattedErrorList || [],
+    messages: list.map(m => ({
+      messageId: m.messageId,
+      timestamp: m.timestamp,
+      ValidationStatus: m.ValidationStatus,
+      formattedErrorList: m.formattedErrorList || [],
     })),
   };
 }
@@ -412,7 +408,7 @@ function summarizeSession(sessionId, s) {
     summarizeFlow(sessionId, fid, fl, current.sessionId === sessionId && current.flowId === fid)
   );
 
-  const payloadCount = flowObjs.reduce((n, f) => n + (f.payloadCount || 0), 0);
+  const messageCount = flowObjs.reduce((n, f) => n + (f.messageCount || 0), 0);
   const validCount   = flowObjs.reduce((n, f) => n + (f.validCount || 0), 0);
   const invalidCount = flowObjs.reduce((n, f) => n + (f.invalidCount || 0), 0);
 
@@ -422,7 +418,7 @@ function summarizeSession(sessionId, s) {
     endedAt: s.endedAt || null,
     isCurrent: current.sessionId === sessionId,
     flowCount: Object.keys(flows).length,
-    payloadCount,
+    messageCount,
     validCount,
     invalidCount,
     flows: flowObjs,
@@ -436,12 +432,12 @@ function buildDashboardModel() {
   const totals = sessionObjs.reduce(
     (acc, ss) => {
       acc.flows     += ss.flowCount;
-      acc.payloads  += ss.payloadCount;
+      acc.messages  += ss.messageCount;
       acc.valid     += ss.validCount;
       acc.invalid   += ss.invalidCount;
       return acc;
     },
-    { sessions: Object.keys(sessions).length, flows: 0, payloads: 0, valid: 0, invalid: 0 }
+    { sessions: Object.keys(sessions).length, flows: 0, messages: 0, valid: 0, invalid: 0 }
   );
 
   return {
@@ -453,15 +449,15 @@ function buildDashboardModel() {
 
 async function exportXlsx(res, filename, rows) {
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet("Events");
+  const ws = wb.addWorksheet("Messages");
   ws.columns = [
-    { header: "Payload ID", key: "payloadId", width: 40 },
+    { header: "Message ID", key: "messageId", width: 40 },
     { header: "Session ID", key: "sessionId", width: 38 },
     { header: "Flow ID",    key: "flowId",    width: 24 },
     { header: "Timestamp",  key: "timestamp", width: 24 },
     { header: "Status",     key: "status",    width: 10 },
     { header: "Errors",     key: "errors",    width: 60 },
-    { header: "Payload (JSON)", key: "payload", width: 80 },
+    { header: "Message (JSON)", key: "message", width: 80 },
   ];
   ws.addRows(rows);
 
@@ -472,18 +468,18 @@ async function exportXlsx(res, filename, rows) {
 }
 
 // JSON detail
-app.get("/payloads/:payloadId.json", (req, res) => {
-  const { event, sessionId, flowId } = findByPayloadId(req.params.payloadId);
-  if (!event) return res.status(404).json({ error: "Not found" });
-  res.json({ sessionId, flowId, event });
+app.get("/messages/:messageId.json", (req, res) => {
+  const { message, sessionId, flowId } = findByMessageId(req.params.messageId);
+  if (!message) return res.status(404).json({ error: "Not found" });
+  res.json({ sessionId, flowId, message });
 });
 
 // HTML detail
-app.get("/payloads/:payloadId", (req, res) => {
-  const { event, sessionId, flowId } = findByPayloadId(req.params.payloadId);
-  if (!event) return res.status(404).send("Not found");
-  const payloadPretty = JSON.stringify(event.payload ?? {}, null, 2);
-  res.render("payload", { event, sessionId, flowId, payloadPretty });
+app.get("/messages/:messageId", (req, res) => {
+  const { message, sessionId, flowId } = findByMessageId(req.params.messageId);
+  if (!message) return res.status(404).send("Not found");
+  const messagePretty = JSON.stringify(message.message ?? {}, null, 2);
+  res.render("message", { message, sessionId, flowId, messagePretty });
 });
 
 // Render initial HTML (no meta refresh anymore)
@@ -497,21 +493,21 @@ app.get("/dashboard/data", (req, res) => {
 });
 
 app.get("/export/all.xlsx", async (req, res) => {
-  const rows = collectEvents({});
+  const rows = collectMessages({});
   await exportXlsx(res, "validation-all.xlsx", rows);
 });
 
 app.get("/sessions/:sessionId/export.xlsx", async (req, res) => {
   const { sessionId } = req.params;
   if (!state.sessions?.[sessionId]) return res.status(404).send("Session not found");
-  const rows = collectEvents({ sessionId });
+  const rows = collectMessages({ sessionId });
   await exportXlsx(res, `validation-session-${sessionId}.xlsx`, rows);
 });
 
 app.get("/sessions/:sessionId/flows/:flowId/export.xlsx", async (req, res) => {
   const { sessionId, flowId } = req.params;
   if (!state.sessions?.[sessionId]?.flows?.[flowId]) return res.status(404).send("Flow not found");
-  const rows = collectEvents({ sessionId, flowId });
+  const rows = collectMessages({ sessionId, flowId });
   await exportXlsx(res, `validation-session-${sessionId}-flow-${flowId}.xlsx`, rows);
 });
 

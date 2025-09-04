@@ -83,7 +83,7 @@
     totals.innerHTML = `
       <span>Total Sessions: <b>${model.totals?.sessions ?? 0}</b></span>
       <span>Total Flows: <b>${model.totals?.flows ?? 0}</b></span>
-      <span>Total Payloads: <b>${model.totals?.payloads ?? 0}</b></span>
+      <span>Total Messages: <b>${model.totals?.messages ?? 0}</b></span>
       <span class="ok">Valid: <b>${model.totals?.valid ?? 0}</b></span>
       <span class="bad">Invalid: <b>${model.totals?.invalid ?? 0}</b></span>
     `;
@@ -107,7 +107,7 @@
               Created: ${esc(s.createdAt)}
               ${s.endedAt ? ` — Ended: ${esc(s.endedAt)}` : ``}
               — Flows: ${s.flowCount ?? 0}
-              — Payloads: ${s.payloadCount ?? 0}
+              — Messages: ${s.messageCount ?? 0}
               — <span class="ok">Valid: ${s.validCount ?? 0}</span>
               — <span class="bad">Invalid: ${s.invalidCount ?? 0}</span>
               — <a href="/sessions/${esc(s.sessionId)}/export.xlsx">Export Session</a>
@@ -127,7 +127,7 @@
                   ${f.isCurrent ? `<span class="badge badge-current">current</span>` : ``}
                   <span class="tag">
                     &nbsp;Created: ${esc(f.createdAt)} ${f.endedAt ? ` — Ended: ${esc(f.endedAt)}` : ``}
-                    — Payloads: ${f.payloadCount ?? (f.payloads?.length ?? 0)}
+                    — Messages: ${f.messageCount ?? (f.messages?.length ?? 0)}
                     — <span class="ok">Valid: ${f.validCount ?? 0}</span>
                     — <span class="bad">Invalid: ${f.invalidCount ?? 0}</span>
                     — <a href="/sessions/${esc(s.sessionId)}/flows/${esc(f.flowId)}/export.xlsx" target="_blank">Export Flow</a>
@@ -136,19 +136,19 @@
 
                 <table class="mt-2">
                   <thead>
-                    <tr><th>When</th><th>Payload ID</th><th>Status</th><th>Errors</th></tr>
+                    <tr><th>When</th><th>Message ID</th><th>Status</th><th>Errors</th></tr>
                   </thead>
                   <tbody>
                     ${
-                      (!f.payloads || f.payloads.length === 0)
-                        ? `<tr><td colspan="4"><em>No payloads</em></td></tr>`
-                        : f.payloads.map(p => {
+                      (!f.messages || f.messages.length === 0)
+                        ? `<tr><td colspan="4"><em>No messages</em></td></tr>`
+                        : f.messages.map(p => {
                             const ok = p.ValidationStatus === 'Valid';
                             const errs = (p.formattedErrorList || []).map(e => `<li>${esc(e)}</li>`).join('');
                             return `
                               <tr class="${ok ? 'valid' : 'invalid'}">
                                 <td>${esc(p.timestamp)}</td>
-                                <td><a href="/payloads/${esc(p.payloadId)}" target="_blank"><code>${esc(p.payloadId)}</code></a></td>
+                                <td><a href="/messages/${esc(p.messageId)}" target="_blank"><code>${esc(p.messageId)}</code></a></td>
                                 <td>${esc(p.ValidationStatus)}</td>
                                 <td>${errs ? `<ul>${errs}</ul>` : `<em>None</em>`}</td>
                               </tr>
@@ -194,7 +194,7 @@
     return res.json().catch(() => ({}));
   }
 
-  async function clearAll(){ if(!confirm('Clear ALL sessions, flows, and payloads?'))return; await api('/state','DELETE'); await fetchAndRender(); }
+  async function clearAll(){ if(!confirm('Clear ALL sessions, flows, and messages?'))return; await api('/state','DELETE'); await fetchAndRender(); }
   async function startSession(){
   try { await api('/sessions','POST'); await fetchAndRender(); }
   catch (e) { alert('Start Session failed: ' + e.message); }

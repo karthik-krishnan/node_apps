@@ -18,19 +18,39 @@
   <div id="totals" class="counts"></div>
 
   <div class="controls">
-    <button class="btn btn--primary" onclick="startSession()">Start Session</button>
-    <button class="btn" onclick="endSession()">End Session</button>
-    <button class="btn btn--primary" onclick="startFlow()">Start Flow…</button>
-    <button class="btn" onclick="endFlow()">End Flow</button>
-    <button class="btn btn--danger" onclick="clearAll()">Clear All</button>
+    <button id="btnStartSession" class="btn btn--primary" onclick="startSession()">Start Session</button>
+    <button id="btnEndSession"   class="btn"              onclick="endSession()">End Session</button>
+    <button id="btnStartFlow"    class="btn btn--primary" onclick="startFlow()">Start Flow…</button>
+    <button id="btnEndFlow"      class="btn"              onclick="endFlow()">End Flow</button>
+    <button id="btnClearAll"     class="btn btn--danger"  onclick="clearAll()">Clear All</button>
     <a class="btn" href="/state">View JSON</a>
     <a class="btn" href="/export/all.xlsx">Export All (xlsx)</a>
   </div>
-
+  
   <div id="root"></div>
 </div>
 
 <script>
+  const $id = (x) => document.getElementById(x);
+  let latestModel = null; // keep the last model for button guards
+
+  function setControls(model) {
+    const hasSession = !!(model.current && model.current.sessionId);
+    const hasFlow    = !!(model.current && model.current.flowId);
+
+    // Policy: allow starting a NEW session anytime (auto-ends old one)
+    $id('btnStartSession').disabled = false;
+
+    // End Session only when a session exists
+    $id('btnEndSession').disabled = !hasSession;
+
+    // Start Flow only when a session exists
+    $id('btnStartFlow').disabled = !hasSession;
+
+    // End Flow only when a flow exists
+    $id('btnEndFlow').disabled = !hasFlow;
+  }
+
   // --- utils ---
   const openKeys = new Set();
   let auto = true;
@@ -159,7 +179,9 @@
       captureOpen();
       const res = await fetch('/dashboard/data');
       const model = await res.json();
+      latestModel = model;
       render(model);
+      setControls(model);
       restoreOpen();
     } catch (e) { console.warn('Refresh failed:', e); }
   }
@@ -173,14 +195,30 @@
   }
 
   async function clearAll(){ if(!confirm('Clear ALL sessions, flows, and payloads?'))return; await api('/state','DELETE'); await fetchAndRender(); }
-  async function startSession(){ await api('/sessions','POST'); await fetchAndRender(); }
-  async function endSession(){ await api('/sessions/end','POST'); await fetchAndRender(); }
-  async function startFlow(){
-    const flowId = prompt('Enter flowId (alphanumeric + underscore):'); if(!flowId) return;
-    const name = prompt('Optional flow name:', flowId) || flowId;
-    await api('/flows','POST',{ flowId, name }); await fetchAndRender();
-  }
-  async function endFlow(){ await api('/flows/end','POST'); await fetchAndRender(); }
+  async function startSession(){
+  try { await api('/sessions','POST'); await fetchAndRender(); }
+  catch (e) { alert('Start Session failed: ' + e.message); }
+}
+
+async function endSession(){
+  if (!latestModel?.current?.sessionId) return alert('No active session.');
+  try { await api('/sessions/end','POST'); await fetchAndRender(); }
+  catch (e) { alert('End Session failed: ' + e.message); }
+}
+
+async function startFlow(){
+  if (!latestModel?.current?.sessionId) return alert('Start a session first.');
+  const flowId = prompt('Enter flowId (alphanumeric + underscore):'); if(!flowId) return;
+  const name = prompt('Optional flow name:', flowId) || flowId;
+  try { await api('/flows','POST',{ flowId, name }); await fetchAndRender(); }
+  catch (e) { alert('Start Flow failed: ' + e.message); }
+}
+
+async function endFlow(){
+  if (!latestModel?.current?.flowId) return alert('No active flow.');
+  try { await api('/flows/end','POST'); await fetchAndRender(); }
+  catch (e) { alert('End Flow failed: ' + e.message); }
+}
 
   const chk = document.getElementById('autoChk');
   chk.addEventListener('change', () => { auto = chk.checked; });

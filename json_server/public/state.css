@@ -37,6 +37,11 @@ body {
   
   .btn--primary { border-color: #60a5fa; }
   .btn--danger  { border-color: #fca5a5; color: #b91c1c; }
+  .btn[disabled] {
+    opacity: .5;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
   
   /* ========== Badges ========== */
   .badge {

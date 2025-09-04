@@ -10,15 +10,7 @@
   <h1>Validation Dashboard</h1>
 
   <div id="header" class="flex">
-    <div id="header-info">
-        <% if (current && current.sessionId) { %>
-        <div>Current Session: <span class="badge badge-current"><%= current.sessionId %></span>
-            <% if (current.flowId) { %> — Current Flow: <span class="badge badge-current"><%= current.flowId %></span><% } %>
-        </div>
-        <% } else { %>
-        <div class="tag">No active session</div>
-        <% } %>
-    </div>
+    <div id="header-info"><span class="tag">No active session</span></div>
     <div class="spacer"></div>
     <label class="tag"><input type="checkbox" id="autoChk" checked> Auto-refresh</label>
   </div>
@@ -32,12 +24,14 @@
     <button class="btn" onclick="endFlow()">End Flow</button>
     <button class="btn btn--danger" onclick="clearAll()">Clear All</button>
     <a class="btn" href="/state">View JSON</a>
+    <a class="btn" href="/export/all.xlsx">Export All (xlsx)</a>
   </div>
 
   <div id="root"></div>
 </div>
 
 <script>
+  // --- utils ---
   const openKeys = new Set();
   let auto = true;
 
@@ -52,32 +46,37 @@
     openKeys.forEach(id => { const d = document.getElementById(id); if (d) d.setAttribute('open',''); });
   }
 
+  // --- render ---
   function render(model) {
+    // Header: Current session/flow
     const headerInfo = document.getElementById('header-info');
     headerInfo.innerHTML = (model.current && model.current.sessionId)
-        ? `Current Session: <span class="badge badge-current">${esc(model.current.sessionId)}</span>${
-            model.current.flowId
+      ? `Current Session: <span class="badge badge-current">${esc(model.current.sessionId)}</span>${
+          model.current.flowId
             ? ` — Current Flow: <span class="badge badge-current">${esc(model.current.flowId)}</span>`
             : ''
         }`
-    : `<span class="tag">No active session</span>`;
+      : `<span class="tag">No active session</span>`;
 
+    // Totals
     const totals = document.getElementById('totals');
     totals.innerHTML = `
-      <span>Total Sessions: <b>${model.totals.sessions}</b></span>
-      <span>Total Flows: <b>${model.totals.flows}</b></span>
-      <span>Total Events: <b>${model.totals.events}</b></span>
-      <span class="ok">Valid: <b>${model.totals.valid}</b></span>
-      <span class="bad">Invalid: <b>${model.totals.invalid}</b></span>
+      <span>Total Sessions: <b>${model.totals?.sessions ?? 0}</b></span>
+      <span>Total Flows: <b>${model.totals?.flows ?? 0}</b></span>
+      <span>Total Payloads: <b>${model.totals?.payloads ?? 0}</b></span>
+      <span class="ok">Valid: <b>${model.totals?.valid ?? 0}</b></span>
+      <span class="bad">Invalid: <b>${model.totals?.invalid ?? 0}</b></span>
     `;
 
+    // Body
     const root = document.getElementById('root');
     const parts = [];
 
-    if (!model.sessions || model.sessions.length === 0) {
+    const sessions = model.sessions || [];
+    if (sessions.length === 0) {
       parts.push(`<p><em>No sessions yet.</em></p>`);
     } else {
-      for (const s of model.sessions) {
+      for (const s of sessions) {
         parts.push(`
           <section class="section">
             <h2>
@@ -87,47 +86,55 @@
             <div class="meta">
               Created: ${esc(s.createdAt)}
               ${s.endedAt ? ` — Ended: ${esc(s.endedAt)}` : ``}
-              — Flows: ${s.flowCount} — Events: ${s.eventCount}
-              — <span class="ok">Valid: ${s.validCount}</span> — <span class="bad">Invalid: ${s.invalidCount}</span>
+              — Flows: ${s.flowCount ?? 0}
+              — Payloads: ${s.payloadCount ?? 0}
+              — <span class="ok">Valid: ${s.validCount ?? 0}</span>
+              — <span class="bad">Invalid: ${s.invalidCount ?? 0}</span>
+              — <a href="/sessions/${esc(s.sessionId)}/export.xlsx">Export Session</a>
             </div>
         `);
 
-        if (!s.flows || s.flows.length === 0) {
+        const flows = s.flows || [];
+        if (flows.length === 0) {
           parts.push(`<p><em>No flows in this session.</em></p>`);
         } else {
-          for (const f of s.flows) {
-            const openAttr = openKeys.has(fidKey(s.sessionId, f.flowId)) || f.isCurrent ? ' open' : '';
+          for (const f of flows) {
+            const openAttr = (f.isCurrent ? ' open' : (document.getElementById(fidKey(s.sessionId, f.flowId))?.open ? ' open' : ''));
             parts.push(`
               <details id="${fidKey(s.sessionId, f.flowId)}" class="details"${openAttr}>
                 <summary class="summary">
-                  Flow <code>${esc(f.flowId)}</code> — ${esc(f.name)}
+                  Flow <code>${esc(f.flowId)}</code> — ${esc(f.name ?? f.flowId)}
                   ${f.isCurrent ? `<span class="badge badge-current">current</span>` : ``}
                   <span class="tag">
                     &nbsp;Created: ${esc(f.createdAt)} ${f.endedAt ? ` — Ended: ${esc(f.endedAt)}` : ``}
-                    — Events: ${f.count} — <span class="ok">Valid: ${f.validCount}</span> — <span class="bad">Invalid: ${f.invalidCount}</span>
+                    — Payloads: ${f.payloadCount ?? (f.payloads?.length ?? 0)}
+                    — <span class="ok">Valid: ${f.validCount ?? 0}</span>
+                    — <span class="bad">Invalid: ${f.invalidCount ?? 0}</span>
+                    — <a href="/sessions/${esc(s.sessionId)}/flows/${esc(f.flowId)}/export.xlsx" target="_blank">Export Flow</a>
                   </span>
                 </summary>
 
                 <table class="mt-2">
                   <thead>
-                    <tr><th>When</th><th>EventId</th><th>BeaconId</th><th>Status</th><th>Errors</th></tr>
+                    <tr><th>When</th><th>Payload ID</th><th>Status</th><th>Errors</th></tr>
                   </thead>
                   <tbody>
-                    ${(!f.events || f.events.length === 0)
-                      ? `<tr><td colspan="5"><em>No events</em></td></tr>`
-                      : f.events.map(ev => {
-                          const ok = ev.ValidationStatus === 'Valid';
-                          const errs = (ev.formattedErrorList || []).map(e => `<li>${esc(e)}</li>`).join('');
-                          return `
-                            <tr class="${ok ? 'valid' : 'invalid'}">
-                              <td>${esc(ev.timestamp)}</td>
-                              <td><code>${esc(ev.eventId)}</code></td>
-                              <td>${esc(ev.BeaconId)}</td>
-                              <td>${esc(ev.ValidationStatus)}</td>
-                              <td>${errs ? `<ul>${errs}</ul>` : ''}</td>
-                            </tr>
-                          `;
-                        }).join('')}
+                    ${
+                      (!f.payloads || f.payloads.length === 0)
+                        ? `<tr><td colspan="4"><em>No payloads</em></td></tr>`
+                        : f.payloads.map(p => {
+                            const ok = p.ValidationStatus === 'Valid';
+                            const errs = (p.formattedErrorList || []).map(e => `<li>${esc(e)}</li>`).join('');
+                            return `
+                              <tr class="${ok ? 'valid' : 'invalid'}">
+                                <td>${esc(p.timestamp)}</td>
+                                <td><a href="/payloads/${esc(p.payloadId)}" target="_blank"><code>${esc(p.payloadId)}</code></a></td>
+                                <td>${esc(p.ValidationStatus)}</td>
+                                <td>${errs ? `<ul>${errs}</ul>` : `<em>None</em>`}</td>
+                              </tr>
+                            `;
+                          }).join('')
+                    }
                   </tbody>
                 </table>
               </details>
@@ -138,12 +145,15 @@
       }
     }
 
-    root.innerHTML = parts.join('');
+    document.getElementById('root').innerHTML = parts.join('');
+
+    // persist expanded sections
     document.querySelectorAll('details').forEach(d => {
       d.addEventListener('toggle', () => { if (d.open) openKeys.add(d.id); else openKeys.delete(d.id); });
     });
   }
 
+  // --- data & actions ---
   async function fetchAndRender() {
     try {
       captureOpen();
@@ -161,7 +171,8 @@
     if (!res.ok) throw new Error(await res.text());
     return res.json().catch(() => ({}));
   }
-  async function clearAll(){ if(!confirm('Clear ALL sessions, flows, and events?'))return; await api('/state','DELETE'); await fetchAndRender(); }
+
+  async function clearAll(){ if(!confirm('Clear ALL sessions, flows, and payloads?'))return; await api('/state','DELETE'); await fetchAndRender(); }
   async function startSession(){ await api('/sessions','POST'); await fetchAndRender(); }
   async function endSession(){ await api('/sessions/end','POST'); await fetchAndRender(); }
   async function startFlow(){

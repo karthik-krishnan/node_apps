@@ -2,8 +2,9 @@ const express = require("express");
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
 const path = require("path");
-const { v4: uuidv4 } = require("uuid");
 const { getValidatorForFlow, ValidationError } = require("./validators");
+const { randomUUID } = require("crypto");
+const ExcelJS = require("exceljs");
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -77,19 +78,57 @@ function ensureFlow(sessionId, flowId, name) {
   return s.flows[flowId];
 }
 
-// Find BeaconId recursively (kept)
-function findBeaconId(obj) {
-  if (!obj || typeof obj !== "object") return null;
-  if (Object.prototype.hasOwnProperty.call(obj, "BeaconId")) return obj.BeaconId;
-  if (Object.prototype.hasOwnProperty.call(obj, "beaconId")) return obj.beaconId;
-  for (const k of Object.keys(obj)) {
-    const v = obj[k];
-    if (v && typeof v === "object") {
-      const found = findBeaconId(v);
-      if (found != null) return found;
+// Find a captured event anywhere by payloadId
+function findByPayloadId(payloadId) {
+  // If you have sessions/flows:
+  if (state.sessions) {
+    for (const [sid, s] of Object.entries(state.sessions)) {
+      for (const [fid, f] of Object.entries(s.flows || {})) {
+        const ev = (f.events || []).find(e => e.payloadId === payloadId);
+        if (ev) return { sessionId: sid, flowId: fid, event: ev };
+      }
     }
+    return { sessionId: null, flowId: null, event: null };
   }
-  return null;
+  // Flat fallback:
+  const ev = (state.records || []).find(e => e.payloadId === payloadId);
+  return { sessionId: null, flowId: null, event: ev || null };
+}
+
+// Collect rows for export
+function collectEvents(scope) {
+  // returns array of {sessionId, flowId, payloadId, timestamp, ValidationStatus, formattedErrorList, payload}
+  const rows = [];
+  if (!state.sessions) return rows;
+
+  const pushEv = (sid, fid, ev) => rows.push({
+    sessionId: sid,
+    flowId: fid,
+    payloadId: ev.payloadId,
+    timestamp: ev.timestamp,
+    status: ev.ValidationStatus,
+    errors: (ev.formattedErrorList || []).join(" | "),
+    payload: JSON.stringify(ev.payload ?? {})
+  });
+
+  const { sessionId, flowId } = scope;
+  if (sessionId && flowId) {
+    const fl = state.sessions[sessionId]?.flows?.[flowId];
+    if (fl) fl.events.forEach(ev => pushEv(sessionId, flowId, ev));
+    return rows;
+  }
+  if (sessionId) {
+    const s = state.sessions[sessionId];
+    if (s) Object.entries(s.flows || {}).forEach(([fid, fl]) => fl.events.forEach(ev => pushEv(sessionId, fid, ev)));
+    return rows;
+  }
+  // global
+  Object.entries(state.sessions).forEach(([sid, s]) => {
+    Object.entries(s.flows || {}).forEach(([fid, fl]) => {
+      fl.events.forEach(ev => pushEv(sid, fid, ev));
+    });
+  });
+  return rows;
 }
 
 // Numbered-sentence formatter (kept)
@@ -144,21 +183,21 @@ app.get("/test", (req, res) => {
    SESSIONS (single active)
    ===================================================== */
 
-// CHANGED (sticky): Start session — auto-end previous, set current.sessionId
-app.post("/sessions", (req, res) => {                    // CHANGED (sticky)
+
+app.post("/sessions", (req, res) => {                    
   if (current.sessionId) {
     // auto end current session
     const s = getSession(current.sessionId);
     if (!s.endedAt) s.endedAt = new Date().toISOString();
   }
-  const sessionId = uuidv4();
+  const sessionId = randomUUID();
   state.sessions[sessionId] = {
     createdAt: new Date().toISOString(),
     endedAt: null,
     flows: {}
   };
-  current.sessionId = sessionId;                         // NEW (sticky)
-  current.flowId = null;                                 // NEW (sticky)
+  current.sessionId = sessionId;                         
+  current.flowId = null;                                 
   res.json({ ok: true, sessionId, note: "Previous session auto-ended (if any)" });
 });
 
@@ -238,84 +277,83 @@ app.get("/sessions/:sessionId/flows/:flowId", (req, res) => {
 /* =====================================================
    EVENT INGEST (POST /) — now uses sticky current session/flow
    ===================================================== */
-app.post("/", async (req, res) => {                      // CHANGED (sticky)
-  console.log("Received JSON:", req.body);
-  // No headers needed; we route to current pointers
-  if (!current.sessionId) return res.status(409).json({ ok: false, error: "No active session. Start a session." });
-  if (!current.flowId) return res.status(409).json({ ok: false, error: "No active flow. Start a flow." });
-
-  const sessionId = current.sessionId;
-  const flowId = current.flowId;
-  const payload = req.body;
-
-  const s = getSession(sessionId);
-  const f = getFlow(sessionId, flowId);
-
-  // Build cross-event context (kept)
-  const ctx = {
-    sessionId, flowId, state,
-    findEvents: ({ flowId: fid, where } = {}) => {
-      const flows = fid ? [getFlow(sessionId, fid)] : Object.values(s.flows);
-      const out = [];
-      for (const fl of flows) {
-        for (const ev of fl.events) {
-          if (!where || where(ev)) out.push(ev);
+   app.post("/", async (req, res) => {
+    console.log("Received JSON:", req.body);
+    // No headers needed; we route to current pointers
+    if (!current.sessionId) return res.status(409).json({ ok: false, error: "No active session. Start a session." });
+    if (!current.flowId)    return res.status(409).json({ ok: false, error: "No active flow. Start a flow." });
+  
+    const sessionId = current.sessionId;
+    const flowId    = current.flowId;
+    const payload   = req.body;
+  
+    const s = getSession(sessionId);
+    const f = getFlow(sessionId, flowId);
+  
+    // Build cross-event context
+    const ctx = {
+      sessionId, flowId, state,
+      findEvents: ({ flowId: fid, where } = {}) => {
+        const flows = fid ? [getFlow(sessionId, fid)] : Object.values(s.flows);
+        const out = [];
+        for (const fl of flows) {
+          for (const ev of fl.events) {
+            if (!where || where(ev)) out.push(ev);
+          }
         }
+        return out;
+      },
+      getFlow: (fid) => getFlow(sessionId, fid),
+      getSession: () => getSession(sessionId)
+    };
+  
+    // Resolve validator for current flow (per-flow schemas + optional custom)
+    const validator = await getValidatorForFlow(flowId, {
+      ajv,
+      baseDir: path.join(__dirname, "validators")
+    });
+  
+    // Execute validations
+    let schemaErrors = [];
+    let customErrors = [];
+    let valid = true;
+    try {
+      const result = await validator.validate(payload, ctx);
+      valid         = result.valid;
+      schemaErrors  = result.schemaErrors || [];
+      customErrors  = result.customErrors || [];
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        valid = false;
+        customErrors = [err.message];
+      } else {
+        console.error("Validator error", err);
+        valid = false;
+        customErrors = ["Internal validator error"];
       }
-      return out;
-    },
-    getFlow: (fid) => getFlow(sessionId, fid),
-    getSession: () => getSession(sessionId)
-  };
-
-  // Resolve validator for current flow (per-flow schemas + optional custom)
-  const validator = await getValidatorForFlow(flowId, {
-    ajv,
-    baseDir: path.join(__dirname, "validators")
-  }); 
-
-  // Execute validations
-  let schemaErrors = [];
-  let customErrors = [];
-  let valid = true;
-  try {
-    const result = await validator.validate(payload, ctx);
-    valid = result.valid;
-    schemaErrors = result.schemaErrors || [];
-    customErrors = result.customErrors || [];
-  } catch (err) {
-    if (err instanceof ValidationError) {
-      valid = false;
-      customErrors = [err.message];
-    } else {
-      console.error("Validator error", err);
-      valid = false;
-      customErrors = ["Internal validator error"];
     }
-  }
-
-  const formattedErrorList = valid
-    ? []
-    : [
-        ...formatErrorsAsSentences(schemaErrors),
-        ...customErrors.map((m, i) => `${i + 1 + schemaErrors.length}. ${m}`)
-      ];
-
-  // Persist event
-  const record = {
-    eventId: uuidv4(),
-    timestamp: new Date().toISOString(),
-    BeaconId: findBeaconId(payload),
-    ValidationStatus: valid ? "Valid" : "Invalid",
-    formattedErrorList,
-    payload
-  };
-  f.events.push(record);
-
-  // Respond
-  if (valid) return res.json({ ok: true, eventId: record.eventId });
-  return res.status(400).json({ ok: false, eventId: record.eventId, errors: formattedErrorList });
-});
+  
+    const formattedErrorList = valid
+      ? []
+      : [
+          ...formatErrorsAsSentences(schemaErrors),
+          ...customErrors.map((m, i) => `${i + 1 + schemaErrors.length}. ${m}`)
+        ];
+  
+    const record = {
+      payloadId: randomUUID(),                              
+      timestamp: new Date().toISOString(),
+      ValidationStatus: valid ? "Valid" : "Invalid",
+      formattedErrorList,
+      payload                                            
+    };
+    f.events.push(record);
+  
+    // Respond with payloadId
+    if (valid) return res.json({ ok: true,  payloadId: record.payloadId });
+    return res.status(400).json({ ok: false, payloadId: record.payloadId, errors: formattedErrorList });
+  });
+  
 
 /* =====================================================
    Global rollup & clearing (kept)
@@ -343,48 +381,110 @@ app.delete("/state", (req, res) => {
    HTML Views (mark current)
    ===================================================== */
 
-// Build hierarchical sessions → flows → events, plus totals
-function buildDashboardModel() {
-  const sessions = Object.entries(state.sessions).map(([sid, s]) => {
-    const flows = Object.entries(s.flows).map(([fid, f]) => {
-      const count = f.events.length;
-      const validCount = f.events.filter(e => e.ValidationStatus === "Valid").length;
-      const invalidCount = count - validCount;
-      return {
-        sessionId: sid,
-        flowId: fid,
-        name: f.name,
-        createdAt: f.createdAt,
-        endedAt: f.endedAt,
-        isCurrent: current.sessionId === sid && current.flowId === fid,
-        count, validCount, invalidCount,
-        events: f.events
-      };
-    });
-    const flowCount = flows.length;
-    const eventCount = flows.reduce((n, fl) => n + fl.count, 0);
-    const validCount = flows.reduce((n, fl) => n + fl.validCount, 0);
-    const invalidCount = eventCount - validCount;
-    return {
-      sessionId: sid,
-      createdAt: s.createdAt,
-      endedAt: s.endedAt,
-      isCurrent: current.sessionId === sid,
-      flowCount, eventCount, validCount, invalidCount,
-      flows
-    };
-  });
+// ---------- Dashboard model builders (use payloads in the JSON) ----------
+function summarizeFlow(sessionId, flowId, fl, isCurrent) {
+  const list = fl.events || []; // state stays "events"
+  const validCount = list.filter(e => e.ValidationStatus === "Valid").length;
+  const invalidCount = list.length - validCount;
 
-  const totals = {
-    sessions: sessions.length,
-    flows: sessions.reduce((n, s) => n + s.flowCount, 0),
-    events: sessions.reduce((n, s) => n + s.eventCount, 0),
-    valid:  sessions.reduce((n, s) => n + s.validCount, 0),
-    invalid: sessions.reduce((n, s) => n + s.invalidCount, 0)
+  return {
+    flowId,
+    name: fl.name || flowId,
+    createdAt: fl.createdAt,
+    endedAt: fl.endedAt || null,
+    isCurrent: !!isCurrent,
+    payloadCount: list.length,
+    validCount,
+    invalidCount,
+    // What the dashboard renders as rows:
+    payloads: list.map(ev => ({
+      payloadId: ev.payloadId,
+      timestamp: ev.timestamp,
+      ValidationStatus: ev.ValidationStatus,
+      formattedErrorList: ev.formattedErrorList || [],
+    })),
   };
-
-  return { sessions, current, totals };
 }
+
+function summarizeSession(sessionId, s) {
+  const flows = s.flows || {};
+  const flowObjs = Object.entries(flows).map(([fid, fl]) =>
+    summarizeFlow(sessionId, fid, fl, current.sessionId === sessionId && current.flowId === fid)
+  );
+
+  const payloadCount = flowObjs.reduce((n, f) => n + (f.payloadCount || 0), 0);
+  const validCount   = flowObjs.reduce((n, f) => n + (f.validCount || 0), 0);
+  const invalidCount = flowObjs.reduce((n, f) => n + (f.invalidCount || 0), 0);
+
+  return {
+    sessionId,
+    createdAt: s.createdAt,
+    endedAt: s.endedAt || null,
+    isCurrent: current.sessionId === sessionId,
+    flowCount: Object.keys(flows).length,
+    payloadCount,
+    validCount,
+    invalidCount,
+    flows: flowObjs,
+  };
+}
+
+function buildDashboardModel() {
+  const sessions = state.sessions || {};
+  const sessionObjs = Object.entries(sessions).map(([sid, s]) => summarizeSession(sid, s));
+
+  const totals = sessionObjs.reduce(
+    (acc, ss) => {
+      acc.flows     += ss.flowCount;
+      acc.payloads  += ss.payloadCount;
+      acc.valid     += ss.validCount;
+      acc.invalid   += ss.invalidCount;
+      return acc;
+    },
+    { sessions: Object.keys(sessions).length, flows: 0, payloads: 0, valid: 0, invalid: 0 }
+  );
+
+  return {
+    current: { sessionId: current.sessionId || null, flowId: current.flowId || null },
+    totals,
+    sessions: sessionObjs.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || "")),
+  };
+}
+
+async function exportXlsx(res, filename, rows) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Events");
+  ws.columns = [
+    { header: "Payload ID", key: "payloadId", width: 40 },
+    { header: "Session ID", key: "sessionId", width: 38 },
+    { header: "Flow ID",    key: "flowId",    width: 24 },
+    { header: "Timestamp",  key: "timestamp", width: 24 },
+    { header: "Status",     key: "status",    width: 10 },
+    { header: "Errors",     key: "errors",    width: 60 },
+    { header: "Payload (JSON)", key: "payload", width: 80 },
+  ];
+  ws.addRows(rows);
+
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  await wb.xlsx.write(res);
+  res.end();
+}
+
+// JSON detail
+app.get("/payloads/:payloadId.json", (req, res) => {
+  const { event, sessionId, flowId } = findByPayloadId(req.params.payloadId);
+  if (!event) return res.status(404).json({ error: "Not found" });
+  res.json({ sessionId, flowId, event });
+});
+
+// HTML detail
+app.get("/payloads/:payloadId", (req, res) => {
+  const { event, sessionId, flowId } = findByPayloadId(req.params.payloadId);
+  if (!event) return res.status(404).send("Not found");
+  const payloadPretty = JSON.stringify(event.payload ?? {}, null, 2);
+  res.render("payload", { event, sessionId, flowId, payloadPretty });
+});
 
 // Render initial HTML (no meta refresh anymore)
 app.get("/dashboard/html", (req, res) => {
@@ -394,6 +494,25 @@ app.get("/dashboard/html", (req, res) => {
 // NEW: JSON data endpoint used by the page for live updates
 app.get("/dashboard/data", (req, res) => {
   res.json(buildDashboardModel());
+});
+
+app.get("/export/all.xlsx", async (req, res) => {
+  const rows = collectEvents({});
+  await exportXlsx(res, "validation-all.xlsx", rows);
+});
+
+app.get("/sessions/:sessionId/export.xlsx", async (req, res) => {
+  const { sessionId } = req.params;
+  if (!state.sessions?.[sessionId]) return res.status(404).send("Session not found");
+  const rows = collectEvents({ sessionId });
+  await exportXlsx(res, `validation-session-${sessionId}.xlsx`, rows);
+});
+
+app.get("/sessions/:sessionId/flows/:flowId/export.xlsx", async (req, res) => {
+  const { sessionId, flowId } = req.params;
+  if (!state.sessions?.[sessionId]?.flows?.[flowId]) return res.status(404).send("Flow not found");
+  const rows = collectEvents({ sessionId, flowId });
+  await exportXlsx(res, `validation-session-${sessionId}-flow-${flowId}.xlsx`, rows);
 });
 
 // Basic error handler

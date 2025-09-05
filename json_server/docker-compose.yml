@@ -1,0 +1,43 @@
+services:
+  # Optional: your validator (Node) sidecar
+  validator:
+    build: ./validator             # or swap for an image + volume mount
+    working_dir: /app
+    command: ["node", "validation_server.js"]
+    environment:
+      PORT: "8000"
+      NODE_ENV: development
+    volumes:
+      - ./validator:/app:delegated
+      - ./validator/schemas:/app/schemas:ro
+      - ./validator/validators:/app/validators:ro
+      - ./validator/public:/app/public:ro
+      - ./validator/views:/app/views:ro
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "/usr/bin/curl", "-fsS", "http://localhost:8000/test"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  mitmproxy:
+    image: mitmproxy/mitmproxy:latest
+    # If you want mitm to wait until validator is healthy (only needed when using service name)
+    depends_on:
+      validator:
+        condition: service_started
+    ports:
+      - "8080:8080"   # explicit proxy port
+    volumes:
+      - mitm_state:/home/mitmproxy/.mitmproxy   # persist CA certs, etc.
+      - ./mitm/addons:/addons:ro                  # your addon scripts
+    command: >
+      mitmdump
+      -p 8080
+      -s /addons/simplified_mirror.py
+      --set mirror_base=http://validator:8000
+      --set mirror_match=http://192.168.86.62:2000
+volumes:
+  mitm_state:

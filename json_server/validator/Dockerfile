@@ -1,6 +1,10 @@
 # ./validator/Dockerfile
 FROM node:20-alpine
 
+USER root
+RUN apk add --no-cache curl ca-certificates && update-ca-certificates
+USER node
+
 WORKDIR /app
 
 # Install deps first (better layer caching)
